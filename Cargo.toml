@@ -1,5 +1,5 @@
 [package]
-name = "fake_data_gen"
+name = "db_Perfomance"
 version = "0.1.0"
 edition = "2021"
 
@@ -11,3 +11,7 @@ postgres = "0.19.7"
 mongodb = "2.8.2"
 serde = { version = "1.0.198", features = ["derive"] }
 tokio = "1.37.0"
+
+[[bin]]
+name = "db_Performance"
+path = "src/main.rs"
