@@ -1,19 +1,12 @@
 services:
-  rust:
-    build:
-      context: .
-    volumes:
-      - .:/app
-    depends_on:
-      - mongodb
-      - postgresql
-
   mongodb:
     image: mongo:latest
     ports:
       - "27017:27017"
     environment:
       MONGO_INITDB_DATABASE: fakeData
+    networks:
+      - backend
 
   postgresql:
     image: postgres:latest
@@ -23,3 +16,12 @@ services:
       POSTGRES_DB: fakedata
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
+    networks:
+      - backend
+
+networks:
+  backend:
+
+volumes:
+  mongodb_data:
+  postgres_data:

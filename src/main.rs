@@ -4,10 +4,10 @@ use fake::faker::name::en::{FirstName, LastName};
 use fake::faker::phone_number::en::PhoneNumber;
 use fake::{Dummy, Fake, Faker};
 use mongodb::error::Result as MongoResult;
-use mongodb::{options::ClientOptions, Client};
-use postgres::NoTls;
+use mongodb::{Client, IndexModel, bson, Database, Collection};
 use serde::Serialize;
 use std::time::Instant;
+use mongodb::bson::{doc, Document};
 
 #[derive(Serialize, Dummy, Clone)]
 pub struct Data {
@@ -26,9 +26,15 @@ pub struct Data {
 }
 
 // Function to load data into PostgreSQL
-fn load_into_postgres(data: Vec<Data>) -> Result<(), postgres::Error> {
-    let mut client = postgres::Client::connect(
-        "host=postgresql user=postgres password=postgres dbname=fakedata port=5432", NoTls)?;
+async fn load_into_postgres(data: Vec<Data>) -> Result<(), tokio_postgres::Error> {
+    let (mut client, connection) =
+        tokio_postgres::connect("postgresql://postgres:postgres@localhost/fakedata", tokio_postgres::NoTls).await?;
+    tokio::spawn(async move {
+        if let Err(e) = connection.await {
+            eprintln!("connection error: {}", e);
+        }
+    });
+
 
     let table_query: String = "CREATE TABLE IF NOT EXISTS data (
         id SERIAL PRIMARY KEY,
@@ -41,54 +47,117 @@ fn load_into_postgres(data: Vec<Data>) -> Result<(), postgres::Error> {
     )"
     .to_string();
 
-    client.execute(&table_query, &[])?;
+    client.execute(&table_query, &[]).await?;
+
+    let transaction = client.transaction().await?;
+
+
+    let statement = transaction
+        .prepare(
+            "INSERT INTO data (first_name, last_name, city, age, email, phone_number) VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .await?;
 
     for d in data {
-        client.execute(
-            "INSERT INTO data (first_name, last_name, city, age, email, phone_number) VALUES ($1, $2, $3, $4, $5, $6)",
-            &[&d.firstname, &d.lastname, &d.city, &(d.age as i32), &d.email, &d.phone_number],
-        )?;
+        transaction
+            .execute(
+                &statement,
+                &[
+                    &d.firstname,
+                    &d.lastname,
+                    &d.city,
+                    &(d.age as i32),
+                    &d.email,
+                    &d.phone_number,
+                ],
+            )
+            .await?;
     }
+
+    transaction.commit().await?;
 
     Ok(())
 }
 
 // Function to load data into MongoDB
 async fn load_into_mongodb(data: Vec<Data>) -> MongoResult<()> {
-    let client_options = ClientOptions::parse("mongodb://localhost:27017").await?;
-    let client = Client::with_options(client_options)?;
-    let db = client.database("fakeData");
-    let collection = db.collection::<Data>("data");
-    collection.insert_many(data, None).await?;
+    let client = Client::with_uri_str("mongodb://localhost:27017/").await?;
+    let db: Database = client.database("fakedata");
+    let collection: Collection<Document> = db.collection("data");
+
+    let user_documents: Vec<Document> = data
+        .into_iter()
+        .map(|user| bson::to_document(&user).unwrap())
+        .collect();
+
+    collection.insert_many(user_documents, None).await?;
+
     Ok(())
 }
 
 // Function to select data from PostgreSQL
-fn select_from_postgres() -> Result<(), postgres::Error> {
-    let mut client = postgres::Client::connect(
-        "host=localhost user=postgres password=postgres dbname=fakedata",
-        NoTls,
-    )?;
+async fn select_from_postgres() -> Result<(), postgres::Error> {
+    let (client, connection) =
+        tokio_postgres::connect("postgresql://postgres:postgres@localhost/fakedata", tokio_postgres::NoTls).await?;
+    tokio::spawn(async move {
+        if let Err(e) = connection.await {
+            eprintln!("connection error: {}", e);
+        }
+    });
 
     let select_query = "SELECT * FROM data";
-    let _ = client.query(select_query, &[])?;
+    let _ = client.query(select_query, &[]).await?;
 
     Ok(())
 }
 
 // Function to select data from MongoDB
 async fn select_from_mongodb() -> MongoResult<()> {
-    let client_options = ClientOptions::parse("mongodb://mongodb:27017").await?;
-    let client = Client::with_options(client_options)?;
-    let db = client.database("fakeData");
-    let collection = db.collection::<Data>("data");
-    let _ = collection.find(None, None).await?;
+    let client = Client::with_uri_str("mongodb://localhost:27017/").await?;
+    let db: Database = client.database("fakedata");
+    let collection: Collection<Document> = db.collection("data");
+
+    collection.find(None, None).await?;
+
+    Ok(())
+}
+
+// Function to create indexes in PostgreSQL
+async fn create_indexes_postgres() -> Result<(), postgres::Error> {
+    let (client, connection) =
+        tokio_postgres::connect("postgresql://postgres:postgres@localhost/fakedata", tokio_postgres::NoTls).await?;
+    tokio::spawn(async move {
+        if let Err(e) = connection.await {
+            eprintln!("connection error: {}", e);
+        }
+    });
+
+    // Create indexes
+    client.execute("CREATE INDEX data_index ON data (lower(first_name))", &[]).await?;
+
+    Ok(())
+}
+
+// Function to create indexes in MongoDB
+async fn create_indexes_mongodb() -> MongoResult<()> {
+    let client = Client::with_uri_str("mongodb://localhost:27017/").await?;
+    let db: Database = client.database("fakedata");
+    let collection: Collection<Document> = db.collection("data");
+
+    // Define the index model
+    let index_model = IndexModel::builder()
+        .keys(doc! { "first_name": 1 })
+        .build();
+
+    // Create the index
+    collection.create_index(index_model, None).await?;
 
     Ok(())
 }
 
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let mut data_to_insert: Vec<Data> = Vec::new();
 
     println!("Starting Data generation");
@@ -113,13 +182,13 @@ fn main() {
     let now = Instant::now();
 
     {
-        match load_into_postgres(data_to_insert.clone()) {
+        match load_into_postgres(data_to_insert.clone()).await {
             Ok(_) => {
                 let elapsed = now.elapsed();
                 println!("Data inserted into PostgreSQL successfully.");
                 println!("Took {:?}s", elapsed.as_secs());
             },
-            Err(err) => eprintln!("Error inserting data into PostgreSQL: {:?}", err),
+            Err(err) => println!("Error inserting data into PostgreSQL: {:?}", err),
         }
     }
 
@@ -130,19 +199,16 @@ fn main() {
     let now = Instant::now();
 
     {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
             match load_into_mongodb(data_to_insert.clone()).await {
                 Ok(_) => {
+                    let elapsed = now.elapsed();
                     println!("Data inserted into MongoDB successfully.");
+                    println!("Took {:?}s", elapsed.as_secs());
                 },
-                Err(err) => eprintln!("Error inserting data into MongoDB: {:?}", err),
+                Err(err) => println!("Error inserting data into MongoDB: {:?}", err),
             }
-        });
     }
-    let elapsed = now.elapsed();
-    println!("haiiiiiii");
-    println!("Took {:?}s", elapsed.as_secs());
+
 
 
     // Selects
@@ -154,16 +220,15 @@ fn main() {
     let now = Instant::now();
 
     {
-            match select_from_postgres() {
+            match select_from_postgres().await {
                 Ok(_) => {
+                    let elapsed = now.elapsed();
                     println!("Data selected from PostgreSQL successfully.");
+                    println!("Took {:?}ms", elapsed.as_millis());
                 },
                 Err(err) => eprintln!("Error selecting data from PostgreSQL: {:?}", err),
             }
     }
-    let elapsed = now.elapsed();
-    println!("haiiiiii :3");
-    println!("Took {:?}ms", elapsed.as_millis());
 
 
     // Select from MongoDB
@@ -172,16 +237,76 @@ fn main() {
     let now = Instant::now();
 
     {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
             match select_from_mongodb().await {
                 Ok(_) => {
                     let elapsed = now.elapsed();
-                    println!("Data selected from MongoDB successfully.");
+                    println!("Data selected from Mongo DB successfully.");
                     println!("Took {:?}ms", elapsed.as_millis());
                 },
                 Err(err) => eprintln!("Error selecting data from MongoDB: {:?}", err),
             }
-        });
+    }
+
+    println!("\nCreating Indexes");
+
+    // Create indexes for PostgreSQL
+    println!("\nCreating indexes for PostgreSQL");
+
+    let now = Instant::now();
+    match create_indexes_postgres().await {
+        Ok(_) => {
+            let elapsed = now.elapsed();
+            println!("Indexes created in PostgreSQL successfully.");
+            println!("Took {:?}ms", elapsed.as_millis());
+        }
+        Err(err) => eprintln!("Error creating indexes in PostgreSQL: {:?}", err),
+    }
+
+    // Create indexes for MongoDB
+    println!("\nCreating indexes for MongoDB");
+
+    let now = Instant::now();
+    match create_indexes_mongodb().await {
+        Ok(_) => {
+            let elapsed = now.elapsed();
+            println!("Indexes created in MongoDB successfully.");
+            println!("Took {:?}ms", elapsed.as_millis());
+        }
+        Err(err) => eprintln!("Error creating indexes in MongoDB: {:?}", err),
+    }
+
+    println!("\nTesting speed of selects with Index");
+
+    // Select from PostgreSQL
+    println!("\nSelecting data from PostgreSQL");
+
+    let now = Instant::now();
+
+    {
+        match select_from_postgres().await {
+            Ok(_) => {
+                let elapsed = now.elapsed();
+                println!("Data selected from PostgreSQL successfully.");
+                println!("Took {:?}ms", elapsed.as_millis());
+            },
+            Err(err) => eprintln!("Error selecting data from PostgreSQL: {:?}", err),
+        }
+    }
+
+
+    // Select from MongoDB
+    println!("\nSelecting data from MongoDB");
+
+    let now = Instant::now();
+
+    {
+        match select_from_mongodb().await {
+            Ok(_) => {
+                let elapsed = now.elapsed();
+                println!("Data selected from Mongo DB successfully.");
+                println!("Took {:?}ms", elapsed.as_millis());
+            },
+            Err(err) => eprintln!("Error selecting data from MongoDB: {:?}", err),
+        }
     }
 }

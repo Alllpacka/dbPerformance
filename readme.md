@@ -46,5 +46,44 @@ Ebenfalls mithilfe der postgreSQL und MongoDB Libraries, aber mit der Eingebaute
 ##### MongoDB:
 ``17ms``
 
+### Linux:
+#### Insert:
+##### PostgreSQL:
+``553s``
+##### MongoDB:
+``26s``
+
+#### Select:
+##### PostgreSQL:
+``3264ms``
+##### MongoDB:
+``46ms``
+
 ## Lösung 5:
-In Bearbeitung
+### Windows:
+#### Select with Index:
+#### Index creation
+##### PostgreSQL:
+``noch einfügen``
+
+##### MongoDB:
+``noch einfügen``
+##### PostgreSQL:
+``noch einfügen``
+
+##### MongoDB:
+``noch einfügen``
+
+### Linux:
+#### Index creation
+##### PostgreSQL:
+``1533ms``
+
+##### MongoDB:
+``1566ms``
+#### Select with Index:
+##### PostgreSQL:
+``3686ms``
+
+##### MongoDB:
+``19ms``

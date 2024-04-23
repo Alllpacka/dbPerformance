@@ -1,5 +1,5 @@
 [package]
-name = "db_Perfomance"
+name = "dbPerfomance"
 version = "0.1.0"
 edition = "2021"
 
@@ -10,8 +10,9 @@ fake = { version = "2.9.2", features = ["derive"] }
 postgres = "0.19.7"
 mongodb = "2.8.2"
 serde = { version = "1.0.198", features = ["derive"] }
-tokio = "1.37.0"
+tokio = { version = "1.37.0", features = ["rt", "rt-multi-thread", "macros"] }
+tokio-postgres = "0.7.10"
 
-[[bin]]
-name = "db_Performance"
-path = "src/main.rs"
+# [[bin]]
+# name = "dbPerformance"
+# path = "src/main.rs"
