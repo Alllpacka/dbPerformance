@@ -64,15 +64,17 @@ Ebenfalls mithilfe der postgreSQL und MongoDB Libraries, aber mit der Eingebaute
 #### Select with Index:
 #### Index creation
 ##### PostgreSQL:
-``noch einfügen``
+``2045ms``
 
 ##### MongoDB:
-``noch einfügen``
+``3ms``
+
+#### Select with Index:
 ##### PostgreSQL:
-``noch einfügen``
+``1699ms``
 
 ##### MongoDB:
-``noch einfügen``
+``5ms``
 
 ### Linux:
 #### Index creation
